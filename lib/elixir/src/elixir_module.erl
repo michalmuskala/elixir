@@ -295,10 +295,9 @@ specs_form(Data, Defmacro, Defmacrop, Unreachable, Forms) ->
   end.
 
 specs_attributes(Forms, Specs) ->
-  Dict = lists:foldl(fun({{Kind, NameArity, Spec}, Line}, Acc) ->
-                       dict:append({Kind, NameArity}, {Spec, Line}, Acc)
-                     end, dict:new(), Specs),
-  dict:fold(fun({Kind, NameArity}, ExprsLines, Acc) ->
+  Dict = maps:from_list([{{Kind, NameArity}, {Spec, Line}} ||
+                         {{Kind, NameArity, Spec}, Line} <- Specs]),
+  maps:fold(fun({Kind, NameArity}, ExprsLines, Acc) ->
     {Exprs, Lines} = lists:unzip(ExprsLines),
     Line = lists:min(Lines),
     [{attribute, Line, Kind, {NameArity, Exprs}} | Acc]
