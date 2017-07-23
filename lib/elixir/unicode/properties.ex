@@ -123,6 +123,8 @@ defmodule String.Break do
   @moduledoc false
   @whitespace_max_size 3
 
+  @on_load :compile_patterns
+
   prop_path = Path.join(__DIR__, "PropList.txt")
 
   whitespace = Enum.reduce File.stream!(prop_path), [], fn line, acc ->
@@ -150,50 +152,55 @@ defmodule String.Break do
   def do_trim_leading(<<rest::bits>>), do: rest
 
   # trim_trailing
+  %{1 => ones, 2 => twos, 3 => threes} = Enum.group_by(whitespace, &byte_size/1)
+  trim_pattern =
+    for(x <- ones, y <- ones, z <- ones, do: x <> y <> z) ++
+      for(x <- ones, y <- ones, do: x <> y) ++
+      List.flatten(for x <- ones, y <- twos, do: [x <> y, y <> x]) ++
+      ones ++ twos ++ threes
 
-  for codepoint <- whitespace do
-    # We need to increment @whitespace_max_size as well
-    # as the small table (_s) if we add a new entry here.
-    case byte_size(codepoint) do
-      3 ->
-        defp do_trim_trailing_l(unquote(codepoint)), do: -3
-      2 ->
-        defp do_trim_trailing_l(<<_, unquote(codepoint)>>), do: -2
+  def trim_trailing(""), do: ""
+  def trim_trailing(string) when is_binary(string) do
+    pattern = Application.fetch_env!(:elixir, :break_trim_pattern)
+    trim_trailing(string, byte_size(string), pattern)
+  end
 
-        defp do_trim_trailing_s(unquote(codepoint)), do: <<>>
-      1 ->
-        defp do_trim_trailing_l(<<unquote(codepoint), unquote(codepoint), unquote(codepoint)>>), do: -3
-        defp do_trim_trailing_l(<<_, unquote(codepoint), unquote(codepoint)>>), do: -2
-        defp do_trim_trailing_l(<<_, _, unquote(codepoint)>>), do: -1
-
-        defp do_trim_trailing_s(<<x, unquote(codepoint)>>), do: do_trim_trailing_s(<<x>>)
-        defp do_trim_trailing_s(unquote(codepoint)), do: <<>>
+  defp trim_trailing(string, last, pattern) when last >= 3 do
+    possible_start = last - 3
+    case :binary.match(string, pattern, [scope: {possible_start, 3}]) do
+      {_start, 3} ->
+        trim_trailing(string, possible_start, pattern)
+      {start, len} when start === last - len ->
+        trim_trailing(string, start, pattern)
+      _ ->
+        binary_part(string, 0, last)
     end
   end
 
-  defp do_trim_trailing_l(_), do: 0
-  defp do_trim_trailing_s(o), do: o
-
-  def trim_trailing(string) when is_binary(string) do
-    trim_trailing(string, byte_size(string))
-  end
-
-  defp trim_trailing(string, size) when size < @whitespace_max_size do
-    do_trim_trailing_s(string)
-  end
-
-  defp trim_trailing(string, size) do
-    trail = binary_part(string, size, -@whitespace_max_size)
-    case do_trim_trailing_l(trail) do
-      0 -> string
-      x -> trim_trailing(binary_part(string, 0, size + x), size + x)
+  defp trim_trailing(string, last, pattern) do
+    case :binary.match(string, pattern, [scope: {0, last}]) do
+      {_start, ^last} ->
+        ""
+      {start, len} when start === last - len ->
+        binary_part(string, 0, start)
+      _ ->
+        binary_part(string, 0, last)
     end
   end
 
   # Split
 
   def split(string) do
-    :binary.split(string, unquote(whitespace -- non_breakable), [:global, :trim_all])
+    pattern = Application.fetch_env!(:elixir, :break_split_pattern)
+    :binary.split(string, pattern, [:global, :trim_all])
+  end
+
+  defp compile_patterns() do
+    split_pattern = :binary.compile_pattern(unquote(whitespace -- non_breakable))
+    Application.put_env(:elixir, :break_split_pattern, split_pattern)
+    trim_pattern = :binary.compile_pattern(unquote(trim_pattern))
+    Application.put_env(:elixir, :break_trim_pattern, trim_pattern)
+    :ok
   end
 
   # Decompose
