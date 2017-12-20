@@ -105,21 +105,13 @@ defmodule String.Casing do
 
   # Downcase
 
-  def downcase(<<0x03A3::utf8, codepoint::utf8, rest::bits>>, acc, :greek) do
-    downcased =
-      case letter?(codepoint) do
-        true -> 0x03C3
-        false -> 0x03C2
-      end
+  sigma = <<0x03A3::utf8>>
 
-    downcase(<<codepoint::utf8, rest::bits>>, <<acc::binary, downcased::utf8>>, :greek)
+  def downcase(<<unquote(sigma), rest::bits>>, acc, mode) do
+    maybe_downcase_sigma(rest, acc, mode)
   end
 
-  def downcase(<<0x03A3::utf8, rest::bits>>, acc, mode) do
-    downcase(rest, <<acc::binary, 0x03C2::utf8>>, mode)
-  end
-
-  for {codepoint, _upper, lower, _title} <- codes, lower && lower != codepoint do
+  for {codepoint, _upper, lower, _title} <- codes, lower && lower != codepoint && codepoint != sigma do
     def downcase(<<unquote(codepoint), rest::bits>>, acc, mode) do
       downcase(rest, acc <> unquote(lower), mode)
     end
@@ -132,6 +124,19 @@ defmodule String.Casing do
   def downcase("", acc, _mode), do: acc
 
   # Sigma handling
+
+  defp maybe_downcase_sigma(<<next::utf8, _::bits>> = rest, acc, mode) do
+    case mode == :greek and letter?(next) do
+      true ->
+        downcase(rest, <<acc::binary, 0x03C3::utf8>>, mode)
+      false ->
+        downcase(rest, <<acc::binary, 0x03C2::utf8>>, mode)
+    end
+  end
+
+  defp maybe_downcase_sigma("", acc, _mode), do: <<acc::binary, 0x03C2::utf8>>
+
+  @compile {:inline, letter?: 1}
 
   for {first, last} <- rangify.(letters) do
     if first == last do
